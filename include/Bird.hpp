@@ -24,4 +24,5 @@ public:
     Sprite& getSprite();
     FloatRect getBounds();
     bool isDead() const;
+    float getVelocity() const;
 };

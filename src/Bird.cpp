@@ -3,11 +3,6 @@
 
 using namespace std;
 
-// ── Sprite frame coordinates (each frame is 16x16) ──
-//   (0, 0)  = alive, going UP
-//   (16, 0) = alive, going DOWN
-//   (0, 16) = dead, was going UP
-//   (16,16) = dead, was going DOWN
 const IntRect FRAME_UP        ({0,  0},  {16, 16});
 const IntRect FRAME_DOWN      ({16, 0},  {16, 16});
 const IntRect FRAME_DEAD_UP   ({0,  16}, {16, 16});
@@ -38,7 +33,6 @@ void Bird::update(float dt)
     velocity += GRAVITY * dt;
     sprite.move({0.0f, velocity * dt});
 
-    // Switch sprite based on whether bird is rising or falling
     if (velocity < 0.0f)
         sprite.setTextureRect(FRAME_UP);
     else
@@ -53,7 +47,6 @@ void Bird::flap()
 
 void Bird::die()
 {
-    // Pick death frame matching the direction bird was moving
     if (velocity < 0.0f)
         sprite.setTextureRect(FRAME_DEAD_UP);
     else
@@ -85,3 +78,5 @@ bool Bird::isDead() const
 {
     return dead;
 }
+
+float Bird::getVelocity() const { return velocity; }

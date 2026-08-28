@@ -11,14 +11,19 @@ private:
     Sprite bottomPipe;
 
     float xPos;
-    float gapStartY;                  // where the gap begins (top edge of gap)
-    float scrollSpeed = 300.0f;
-    float gapHeight = 400.0f;         // vertical space between top and bottom pipe
+    float gapStartY;
+    float scrollSpeed;
+    float gapHeight = 400.0f;
+
+    float verticalSpeed;
+    int direction;
+    float minY;
+    float maxY;
 
 public:
     bool counted = false;
 
-    Pipe(const Texture& texture, float startX, float gapY);
+    Pipe(const Texture& texture, float startX, float gapY, float currentScrollSpeed, float minY, float maxY);
 
     void update(float dt);
     void draw(RenderWindow& window);
@@ -26,4 +31,10 @@ public:
     bool isPassed(float birdX);
     bool collides(FloatRect birdBounds);
     bool isOffScreen();
+
+    float getX() const;
+    float getGapStartY() const;
+    float getGapHeight() const;
+    int getDirection() const;
+    void setScrollSpeed(float speed);
 };

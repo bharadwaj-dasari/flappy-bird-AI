@@ -19,7 +19,6 @@ int mainOld()
 {
 	Clock clock;
 	RenderWindow win(VideoMode({1600,1200}),"Flappy Bird");
-	//bird
 	Texture birdTexture;
 	if (!birdTexture.loadFromFile("assets/Bird16.png"))	{
     	    	cout << "Failed to load bird!" << endl;
@@ -27,7 +26,6 @@ int mainOld()
 	}
 	Sprite bird(birdTexture, IntRect({0, 0}, {16, 16}));	bird.setScale({10.0f, 10.0f});
 	bird.setPosition({400,600});
-	//ground
 	Texture groundTexture;
 	if (!groundTexture.loadFromFile("assets/Ground.png"))
 	{
@@ -39,7 +37,6 @@ int mainOld()
 	ground.setPosition({0, 1200 - ground.getGlobalBounds().size.y});
 	float groundY = ground.getPosition().y;
 
-	//background
 	Texture backgroundTexture;
 
 	if (!backgroundTexture.loadFromFile("assets/Background.png"))
@@ -51,7 +48,6 @@ int mainOld()
 	background.setScale({1600.0f / 180.0f,1200.0f / 320.0f});
 
 
-	//pipes
 	Texture pipeTexture;
 	if (!pipeTexture.loadFromFile("assets/Pipes16.png"))
 	{
@@ -85,7 +81,6 @@ int mainOld()
 
 		pipes.push_back(pair);
 	}
-	//Event handling
 	while(win.isOpen()){
 	while(const optional event = win.pollEvent()){
 		if(event->is<Event::Closed>())
@@ -133,7 +128,6 @@ int mainOld()
 			}
 		}
 
-		// cout << bird.getPosition().y << " "<< bird.getGlobalBounds().position.y << " "<< bird.getGlobalBounds().size.y << " "<< groundY << endl;
 		if (bird.getPosition().y + bird.getGlobalBounds().size.y >= groundY)
 		{
 			bird.setPosition({

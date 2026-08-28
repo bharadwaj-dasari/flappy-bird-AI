@@ -2,29 +2,26 @@
 #include <iostream>
 #include <cstdlib>
 #include <string>
+#include <chrono>
+#include <algorithm>
+#include <iomanip>
 
 using namespace std;
 using namespace sf;
 
-// ── Bitmap font layout ──
-// Font.png is 1536x32  →  96 characters, 16px wide each (ASCII 32–127)
 const float FONT_CHAR_WIDTH  = 16.0f;
 const float FONT_CHAR_HEIGHT = 32.0f;
 
-// How long (ms) between two Space presses counts as a "double tap"
 const int DOUBLE_TAP_WINDOW = 400;
 
 
-// ═══════════════════════════════════════════════════
-//  Construction & Setup
-// ═══════════════════════════════════════════════════
 
 Game::Game()
     : window(VideoMode({SCREEN_WIDTH, SCREEN_HEIGHT}), "Flappy Bird"),
       background(backgroundTexture),
       ground(groundTexture)
 {
-    // ── Background ──
+    randomEngine.seed(std::chrono::system_clock::now().time_since_epoch().count());
     if (!backgroundTexture.loadFromFile("assets/Background.png"))
     {
         cout << "Failed to load background!" << endl;
@@ -39,7 +36,6 @@ Game::Game()
         SCREEN_HEIGHT / 320.0f
     });
 
-    // ── Ground ──
     if (!groundTexture.loadFromFile("assets/Ground.png"))
     {
         cout << "Failed to load ground!" << endl;
@@ -53,14 +49,12 @@ Game::Game()
     ground.setPosition({0.0f, SCREEN_HEIGHT - ground.getGlobalBounds().size.y});
     groundY = ground.getPosition().y;
 
-    // ── Pipes ──
     if (!pipeTexture.loadFromFile("assets/Pipes16.png"))
     {
         cout << "Failed to load pipes!" << endl;
         return;
     }
 
-    // ── Bitmap font ──
     if (!fontTexture.loadFromFile("assets/Font.png"))
     {
         cout << "Failed to load font!" << endl;
@@ -70,9 +64,6 @@ Game::Game()
 }
 
 
-// ═══════════════════════════════════════════════════
-//  Main Loop
-// ═══════════════════════════════════════════════════
 
 void Game::run()
 {
@@ -86,9 +77,6 @@ void Game::run()
 }
 
 
-// ═══════════════════════════════════════════════════
-//  Input
-// ═══════════════════════════════════════════════════
 
 void Game::handleEvents()
 {
@@ -105,12 +93,10 @@ void Game::handleEvents()
             {
                 if (!dead)
                 {
-                    // Normal gameplay — flap
                     bird.flap();
                 }
                 else
                 {
-                    // Dead — need double-space to restart
                     if (waitingForDoubleSpace &&
                         spaceClock.getElapsedTime().asMilliseconds() < DOUBLE_TAP_WINDOW)
                     {
@@ -119,10 +105,28 @@ void Game::handleEvents()
                     }
                     else
                     {
-                        // First tap — start waiting for the second
                         waitingForDoubleSpace = true;
                         spaceClock.restart();
                     }
+                }
+            }
+
+            if (key == Keyboard::Key::A)
+            {
+                aiMode = !aiMode;
+                cout << (aiMode ? "AI ON" : "AI OFF") << endl;
+                if (aiMode && dead) reset();
+            }
+
+            if (key == Keyboard::Key::N)
+            {
+                nnMode = !nnMode;
+                cout << (nnMode ? "NN ON" : "NN OFF") << endl;
+                if (nnMode) {
+                    aiMode = false;
+                    resetNN();
+                } else {
+                    reset();
                 }
             }
         }
@@ -130,20 +134,9 @@ void Game::handleEvents()
 }
 
 
-// ═══════════════════════════════════════════════════
-//  Game Logic
-// ═══════════════════════════════════════════════════
 
 float Game::randomGapY()
 {
-    // Equal margin from ceiling and ground  →  equal chance of
-    // a tall top pipe vs a tall bottom pipe.
-    //
-    //   min = PIPE_MARGIN                  (gap can't be too close to ceiling)
-    //   max = groundY - gapHeight - PIPE_MARGIN  (gap can't be too close to ground)
-    //
-    // The midpoint of this range is exactly the vertical center of the
-    // playable area, so the distribution is perfectly symmetric.
 
     float gapHeight = 400.0f;   // must match Pipe::gapHeight
     float minGapY = PIPE_MARGIN;
@@ -157,32 +150,39 @@ float Game::randomGapY()
 
 void Game::update(float dt)
 {
+    if (nnMode) {
+        updateNN(dt);
+        return;
+    }
+
+    if (dead && aiMode) { reset(); return; }
     if (dead) return;
+
+    if (aiMode) aiUpdate();
 
     bird.update(dt);
 
-    // ── Spawn pipes on a timer ──
+    currentScrollSpeed = 300.0f + (score / 20) * 100.0f;
+    spawnInterval = 2.5f * (300.0f / currentScrollSpeed);
+
     spawnTimer -= dt;
-    if (spawnTimer <= 0.0f)
-    {
-        pipes.emplace_back(pipeTexture, (float)SCREEN_WIDTH, randomGapY());
+    if (spawnTimer <= 0.0f) {
+        float minGapY = PIPE_MARGIN;
+        float maxGapY = groundY - 400.0f - PIPE_MARGIN;
+        pipes.emplace_back(pipeTexture, (float)SCREEN_WIDTH, randomGapY(), currentScrollSpeed, minGapY, maxGapY);
         spawnTimer = spawnInterval;
     }
 
-    // ── Remove pipes that scrolled off the left edge ──
-    for (auto it = pipes.begin(); it != pipes.end(); )
-    {
-        if (it->isOffScreen())
-            it = pipes.erase(it);
-        else
-            ++it;
+    for (auto it = pipes.begin(); it != pipes.end(); ) {
+        if (it->isOffScreen()) it = pipes.erase(it);
+        else ++it;
     }
 
-    // ── Move pipes ──
-    for (auto& pipe : pipes)
+    for (auto& pipe : pipes) {
+        pipe.setScrollSpeed(currentScrollSpeed);
         pipe.update(dt);
+    }
 
-    // ── Check pipe collision ──
     for (auto& pipe : pipes)
     {
         if (pipe.collides(bird.getBounds()))
@@ -193,7 +193,6 @@ void Game::update(float dt)
         }
     }
 
-    // ── Count score (bird passed a pipe pair) ──
     float birdX = bird.getSprite().getPosition().x;
     for (auto& pipe : pipes)
     {
@@ -204,16 +203,13 @@ void Game::update(float dt)
         }
     }
 
-    // ── Keep bird inside the screen ──
     float birdY = bird.getSprite().getPosition().y;
     float birdH = bird.getBounds().size.y;
     float birdX2 = bird.getSprite().getPosition().x;
 
-    // Ceiling
     if (birdY < 0.0f)
         bird.getSprite().setPosition({birdX2, 0.0f});
 
-    // Ground
     if (birdY + birdH >= groundY)
     {
         bird.getSprite().setPosition({birdX2, groundY - birdH});
@@ -223,9 +219,6 @@ void Game::update(float dt)
 }
 
 
-// ═══════════════════════════════════════════════════
-//  Rendering
-// ═══════════════════════════════════════════════════
 
 void Game::drawBitmapText(const string& text, float centerX, float y, float scale)
 {
@@ -254,13 +247,28 @@ void Game::draw()
     for (auto& pipe : pipes)
         pipe.draw(window);
 
-    window.draw(bird.getSprite());
+    if (nnMode) {
+        for (auto& agent : population) {
+            if (!agent.bird.isDead()) {
+                window.draw(agent.bird.getSprite());
+            }
+        }
+    } else {
+        window.draw(bird.getSprite());
+    }
+    
     window.draw(ground);
 
-    // Score — centered, large
     drawBitmapText(to_string(score), SCREEN_WIDTH / 2.0f, 30.0f, 3.0f);
 
-    // Death prompt
+    if (aiMode)
+        drawBitmapText("AI", 60.0f, 30.0f, 2.5f);
+    if (nnMode) {
+        drawBitmapText("NN", 60.0f, 30.0f, 2.5f);
+        drawBitmapText("GEN " + to_string(generation), 150.0f, 80.0f, 2.0f);
+        drawBitmapText("REC " + to_string(recordScore), 150.0f, 130.0f, 2.0f);
+    }
+
     if (dead)
         drawBitmapText("Double Space to Restart", SCREEN_WIDTH / 2.0f, 550.0f, 2.0f);
 
@@ -268,9 +276,54 @@ void Game::draw()
 }
 
 
-// ═══════════════════════════════════════════════════
-//  Reset
-// ═══════════════════════════════════════════════════
+
+void Game::aiUpdate()
+{
+    float birdX       = bird.getSprite().getPosition().x;
+    float birdY       = bird.getSprite().getPosition().y;
+    float birdH       = bird.getBounds().size.y;
+    float birdCenterY = birdY + birdH / 2.0f;
+
+    Pipe* nextPipe = nullptr;
+    float closestX = 1e9f;
+
+    for (auto& pipe : pipes)
+    {
+        float pipeRight = pipe.getX() + 224.0f;  // 32 * 7 scale
+        if (pipeRight > birdX && pipe.getX() < closestX)
+        {
+            closestX = pipe.getX();
+            nextPipe = &pipe;
+        }
+    }
+
+    // inputs
+    GameState state;
+    state.birdCenterY  = birdCenterY;
+    state.birdVelocity = bird.getVelocity();
+    state.birdBottomY  = birdY + birdH;
+
+    if (nextPipe)
+    {
+        state.gapCenterY = nextPipe->getGapStartY() + nextPipe->getGapHeight() / 2.0f;
+        state.gapBottomY = nextPipe->getGapStartY() + nextPipe->getGapHeight();
+        state.distanceX  = nextPipe->getX() - birdX;
+        state.pipeDirection = (float)nextPipe->getDirection();
+    }
+    else
+    {
+        state.gapCenterY = groundY / 2.0f;
+        state.gapBottomY = groundY;
+        state.distanceX  = (float)SCREEN_WIDTH;
+        state.pipeDirection = 0.0f;
+    }
+    state.scrollSpeed = currentScrollSpeed;
+
+    if (ai.shouldFlap(state))
+        bird.flap();
+}
+
+
 
 void Game::reset()
 {
@@ -279,4 +332,178 @@ void Game::reset()
     spawnTimer = 0.0f;
     pipes.clear();
     bird.reset();
+    pipes.clear();
+    spawnTimer = 0.0f;
+    score = 0;
+    dead = false;
+    currentScrollSpeed = 300.0f;
+    spawnInterval = 2.5f;
+}
+
+void Game::resetNN()
+{
+    pipes.clear();
+    spawnTimer = 0.0f;
+    score = 0;
+    generation = 1;
+    recordScore = 0;
+
+    population.clear();
+    population.resize(8);
+    
+    for (auto& agent : population) {
+        agent.bird.reset();
+        agent.brain.generateWeights(randomEngine);
+        agent.fitness = 0;
+    }
+}
+
+void Game::evolvePopulation()
+{
+    generation++;
+    if (score > recordScore) recordScore = score;
+
+    std::sort(population.begin(), population.end(), std::greater<Agent>());
+
+    for (size_t i = 2; i < population.size(); i++) {
+        population[i].brain.crossover(randomEngine, population[0].brain, population[1].brain);
+    }
+
+    for (auto& agent : population) {
+        agent.bird.reset();
+        agent.fitness = 0;
+    }
+
+    pipes.clear();
+    spawnTimer = 0.0f;
+    score = 0;
+
+    cout << "\n======================================================\n";
+    cout << " GENERATION " << generation - 1 << " REPORT\n";
+    cout << "======================================================\n";
+    cout << " Best Score:   " << recordScore << "\n";
+    cout << " Best Fitness: " << population[0].fitness << "\n\n";
+    
+    cout << " Top Bird's Neural Network Weights:\n";
+    cout << "------------------------------------------------------\n";
+    const auto& w = population[0].brain.getWeights();
+    
+    cout << fixed << setprecision(3);
+    for (int h = 0; h < 4; h++) {
+        cout << " [Hidden Node " << h << "]\n";
+        cout << "   Weight from Velocity   : " << setw(7) << w[0][0][h] << "\n";
+        cout << "   Weight from Gap Dist   : " << setw(7) << w[0][1][h] << "\n";
+        cout << "   Weight from Pipe Dir   : " << setw(7) << w[0][2][h] << "\n";
+    }
+    cout << " [Output Node (Flap)]\n";
+    for (int h = 0; h < 4; h++) {
+        cout << "   Weight from Hidden " << h << "   : " << setw(7) << w[1][h][0] << "\n";
+    }
+    cout << "======================================================\n\n";
+}
+
+void Game::updateNN(float dt)
+{
+    bool allDead = true;
+
+    Pipe* nextPipe = nullptr;
+    float closestX = 1e9f;
+    float birdX = population[0].bird.getSprite().getPosition().x;
+
+    for (auto& pipe : pipes) {
+        float pipeRight = pipe.getX() + 224.0f;
+        if (pipeRight > birdX && pipe.getX() < closestX) {
+            closestX = pipe.getX();
+            nextPipe = &pipe;
+        }
+    }
+
+    for (auto& agent : population) {
+        if (!agent.bird.isDead()) {
+            allDead = false;
+            agent.fitness++;
+
+            GameState state;
+            float bY = agent.bird.getSprite().getPosition().y;
+            float bH = agent.bird.getBounds().size.y;
+            state.birdCenterY = bY + bH / 2.0f;
+            state.birdVelocity = agent.bird.getVelocity();
+            state.birdBottomY = bY + bH;
+
+            if (nextPipe) {
+                state.gapCenterY = nextPipe->getGapStartY() + nextPipe->getGapHeight() / 2.0f;
+                state.gapBottomY = nextPipe->getGapStartY() + nextPipe->getGapHeight();
+                state.distanceX = nextPipe->getX() - birdX;
+                state.pipeDirection = (float)nextPipe->getDirection();
+            } else {
+                state.gapCenterY = groundY / 2.0f;
+                state.gapBottomY = groundY;
+                state.distanceX = (float)SCREEN_WIDTH;
+                state.pipeDirection = 0.0f;
+            }
+            state.scrollSpeed = currentScrollSpeed;
+
+            if (agent.bird.getVelocity() >= 0.0f && agent.brain.shouldFlap(state)) {
+                agent.bird.flap();
+            }
+
+            agent.bird.update(dt);
+
+            bY = agent.bird.getSprite().getPosition().y;
+            if (bY < 0.0f) {
+                agent.bird.getSprite().setPosition({birdX, 0.0f});
+            }
+            if (bY + bH >= groundY) {
+                agent.bird.getSprite().setPosition({birdX, groundY - bH});
+                agent.bird.die();
+            }
+        }
+    }
+
+    if (allDead) {
+        evolvePopulation();
+        return;
+    }
+
+    currentScrollSpeed = 300.0f + (score / 20) * 100.0f;
+    spawnInterval = 2.5f * (300.0f / currentScrollSpeed);
+
+    spawnTimer -= dt;
+    if (spawnTimer <= 0.0f)
+    {
+        float minGapY = PIPE_MARGIN;
+        float maxGapY = groundY - 400.0f - PIPE_MARGIN;
+        pipes.emplace_back(pipeTexture, (float)SCREEN_WIDTH, randomGapY(), currentScrollSpeed, minGapY, maxGapY);
+        spawnTimer = spawnInterval;
+    }
+
+    for (auto it = pipes.begin(); it != pipes.end();)
+    {
+        if (it->isOffScreen())
+            it = pipes.erase(it);
+        else
+            ++it;
+    }
+
+    for (auto& pipe : pipes) {
+        pipe.setScrollSpeed(currentScrollSpeed);
+        pipe.update(dt);
+    }
+
+    for (auto& agent : population) {
+        if (agent.bird.isDead()) continue;
+        for (auto& pipe : pipes) {
+            if (pipe.collides(agent.bird.getBounds())) {
+                agent.bird.die();
+                break;
+            }
+        }
+    }
+
+    for (auto& pipe : pipes) {
+        if (!pipe.counted && pipe.isPassed(birdX)) {
+            pipe.counted = true;
+            score++;
+        }
+    }
 }
